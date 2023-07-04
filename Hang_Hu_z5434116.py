@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed May 10 16:57:23 2023
+Individual Assignment 1
 
-@author: Francisco
+Submitter: Hang Hu z5434116
 
 Reinforcement learning
 
@@ -78,30 +78,32 @@ class World(object):
 
 
 class Agent(object):
-    def __init__(self, world):
+    def __init__(self, world, alpha=0.7, gamma=0.4, epsilon=0.25, t=0.1):
         self.world = world
         self.numOfActions = self.world.getNumOfActions()
         self.numOfStates = self.world.getNumOfStates()
         self.Q = np.loadtxt("initial_Q_values.txt")
         self.rnd_nums = np.loadtxt("random_numbers.txt")
         self.rnd_nums_idx = 0
-        self.alpha = 0.7
-        self.gamma = 0.4
-        self.epsilon = 0.25
-        self.reward = []
-        self.steps = []
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.accum_reward_list = np.array([])
+        self.accum_step_list = np.array([])
+        self.t = t
+        # default iteration
         self.itr = 1000
 
     # softmax action selection
-    def softmaxActionSelection(self, state, t=0.1):
-        # create an array consist of [e^Q(s,0)/t, e^Q(s,1)/t, e^Q(s,2)/t, e^Q(s,3)/t...]
-        actions = np.exp(self.Q[state, :] / t)
+    def softmaxActionSelection(self, state):
+        # create an array consist of [e^Q(s,0)/t, e^Q(s,1)/t, e^Q(s,2)/t...]
+        actions = np.exp(self.Q[state, :] / self.t)
 
-        # make the array in the range [0,1]
+        # normalization
         prob_actions = actions / np.sum(actions)  # total possibility = 1
 
-        # calculate the probability interval
-        # if [0.1,0.2,0.3,0.4] it will become [0.1,0.3,0.6,1]
+        # transform to cumulative probability so that we can use searchsorted
+        # e.g. [0.1,0.2,0.3,0.4] => [0.1,0.3,0.6,1]
         cum_prob_actions = np.cumsum(prob_actions)
         rnd = self.get_nxt_rnd_num()
         action = np.searchsorted(cum_prob_actions, rnd)
@@ -161,86 +163,95 @@ class Agent(object):
             raise ValueError("Must choose a valid learning method")
         return result
 
-    def train(self, iter, method, strategy):
-        self.itr = iter
+    def train(self, itr, method, strategy):
+        self.itr = itr
 
-        for itr in range(iter):
-            accumulatedR = 0.0
+        for itr in range(itr):
+
             state = 0
-
+            a_new = None
             self.world.resetAgent(state)
-
-            # do action
-            a = self.selectAction(strategy, state)
-
             # start the episode
             episode = True
-            # initialize accumulatedR and accumulatedSteps in this episode
 
+            # choose the first action
+            a = self.selectAction(strategy, state)
+
+            # initialize accumulatedR and accumulatedSteps in this episode
+            accumulatedR = 0.0
             accumulatedSteps = 0.0
             while episode:
 
                 # perform action
                 self.world.move(a)
-                # get reward after moving
+                # get reward and new state after moving
                 reward = self.world.getReward()
-                accumulatedR += reward
                 state_new = int(self.world.getState())
-                # record accumulated reward within this episode
 
+                # record accumulated reward within this episode
+                accumulatedR += reward
                 # record steps within this episode
                 accumulatedSteps += 1
 
                 # do new action
-                a_new = self.selectAction(strategy, state_new)
+                if method == "SARSA":
+                    # SARSA will select new action here
+                    a_new = self.selectAction(strategy, state_new)
 
-
+                if method == "QLearning":
+                    # do nothing
+                    pass
 
                 # update Q-values
-                # parameters
                 # 1. current Q value
                 # 2. new state
                 # 3. new action
                 # 4. reward after moving
-                # 5. learning method Q-learning or SARSA
-                # update Q-values
+                # 5. learning method: Q-learning / SARSA
                 self.Q[state, a] = self.calculate_q_value(self.Q[state, a],
                                                           state_new,
                                                           a_new,
                                                           reward,
                                                           method)
+                # update state
                 state = state_new
-                a = a_new
 
+                # reached the goal
                 if reward == 1.0:
                     episode = False
                     self.Q[state_new, :] = 0
-                    self.steps.append(accumulatedSteps)
-                    self.reward.append(accumulatedR)
+                    self.accum_step_list = np.append(self.accum_step_list, accumulatedSteps)
+                    self.accum_reward_list = np.append(self.accum_reward_list, accumulatedR)
                     accumulatedR = 0.0
+                # have not reached the goal
+                else:
+                    if method == "SARSA":
+                        # the new action is the action that will be taken in the next step
+                        a = a_new
+                    if method == "QLearning":
+                        # select new action for Q-learning before next step
+                        a = self.selectAction(strategy, state)
 
-    def train_SARSA_EG(self, iter):
-        self.train(iter, method="SARSA", strategy="EG")
+    def train_SARSA_EG(self, itr):
+        self.train(itr, method="SARSA", strategy="EG")
 
-    def train_SARSA_SM(self, iter):
-        self.train(iter, method="SARSA", strategy="SM")
+    def train_SARSA_SM(self, itr):
+        self.train(itr, method="SARSA", strategy="SM")
 
-    def train_Q_learning_SM(self, iter):
-        self.train(iter, method="QLearning", strategy="SM")
+    def train_Q_learning_SM(self, itr):
+        self.train(itr, method="QLearning", strategy="SM")
 
-    def train_Q_learning_EG(self, iter):
-        self.train(iter, "QLearning", "EG")
+    def train_Q_learning_EG(self, itr):
+        self.train(itr, "QLearning", "EG")
 
     def plotReward(self):
 
         plt.title("Accumulated Reward")
         plt.xlabel("Episodes")
         plt.ylabel("Reward")
-
-        episodes = np.arange(0, 1000)
+        episodes = np.arange(0, self.itr)
         plt.grid(True)
-
-        plt.plot(episodes, self.reward, label="Reward", color="red")
+        plt.plot(episodes, self.accum_reward_list, label="Reward", color="red")
         plt.legend()
         plt.show()
 
@@ -249,9 +260,8 @@ class Agent(object):
         plt.xlabel("Episodes")
         plt.ylabel("Steps")
         episodes = np.arange(0, self.itr)
-
         plt.grid(True)
-        plt.plot(episodes, self.steps, label="Steps", color="green")
+        plt.plot(episodes, self.accum_step_list, label="Steps", color="green")
         plt.legend()
         plt.show()
 
@@ -262,26 +272,29 @@ if __name__ == "__main__":
     world.setReward(1, 1, -1.0)  # Fear region
 
     # Q_learning with epsilon-greedy
-
-    learner = Agent(world)
-    learner.train_Q_learning_EG(1000)
-    learner.plotReward()
-    print(np.array(learner.reward))
+    learner_Q_EG = Agent(world)
+    learner_Q_EG.train_Q_learning_EG(1000)
 
     # Q_learning with softmax
-
-    # learner = Agent(world)
-    # learner.train_Q_learning_SM(1000)
-    # learner.plotReward()
+    learner_Q_SM = Agent(world)
+    learner_Q_SM.train_Q_learning_SM(1000)
 
     # SARSA with epsilon-greedy
-
-    # learner = Agent(world)
-    # learner.train_SARSA_EG(1000)
-    # learner.plotReward()
+    learner_S_EG = Agent(world)
+    learner_S_EG.train_SARSA_EG(1000)
 
     # SARSA with softmax
+    learner_S_SM = Agent(world)
+    learner_S_SM.train_SARSA_SM(1000)
 
-    # learner = Agent(world)
-    # learner.train_SARSA_SM(1000)
-    # learner.plotReward()
+    # plot accumulated reward
+    learner_Q_EG.plotReward()
+    learner_Q_SM.plotReward()
+    learner_S_EG.plotReward()
+    learner_S_SM.plotReward()
+
+    # plot steps per episode
+    learner_Q_EG.plotSteps()
+    learner_Q_SM.plotSteps()
+    learner_S_EG.plotSteps()
+    learner_S_SM.plotSteps()
